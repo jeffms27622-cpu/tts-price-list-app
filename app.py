@@ -14,7 +14,7 @@ import pandas as pd
 import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
-from rapidfuzz import process, fuzz
+from rapidfuzz import process, fuzz, utils
 
 st.set_page_config(page_title="TTS Price List", page_icon="📦", layout="wide")
 
@@ -92,7 +92,8 @@ def cari_district(nama_dicari, df_regpack, df_bigpack):
     if not nama_dicari or not semua_district:
         return None, []
 
-    matches = process.extract(nama_dicari, semua_district, scorer=fuzz.WRatio, limit=5)
+    matches = process.extract(nama_dicari, semua_district, scorer=fuzz.WRatio,
+                               processor=utils.default_process, limit=5)
     return (matches[0][0] if matches else None), matches
 
 
@@ -107,7 +108,8 @@ def cari_produk(nama_dicari, df_produk):
     if df_produk.empty or not nama_dicari:
         return []
     pilihan = df_produk["Nama Produk"].tolist()
-    matches = process.extract(nama_dicari, pilihan, scorer=fuzz.WRatio, limit=8)
+    matches = process.extract(nama_dicari, pilihan, scorer=fuzz.WRatio,
+                               processor=utils.default_process, limit=8)
     return matches
 
 
