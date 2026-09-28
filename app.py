@@ -24,7 +24,7 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets",
 BIGPACK_THRESHOLD_KG = 10   # >= ini pakai BIGPACK, di bawahnya REGPACK
 MIN_BILLABLE_KG = 1         # minimum ongkir dihitung 1kg
 
-PRODUK_COLS = ["Kode", "Nama Produk", "Kategori", "Harga Dasar", "Berat (kg)"]
+PRODUK_COLS = ["Kode", "Nama Produk", "Kategori", "Harga Dasar", "Berat (gram)"]
 RATE_COLS = ["Destination District", "Pulau", "Tarif per kg"]
 
 
@@ -82,6 +82,26 @@ def hitung_ongkir(berat_total_kg: float, district_row_regpack, district_row_bigp
     return kategori, billable, tarif, ongkir
 
 
+def pilih_tarif(berat_kg: float, row_reg, row_big):
+    """Pilih tabel tarif: >= 10kg BIGPACK, di bawahnya REGPACK. Return (kategori, tarif_per_kg atau None)."""
+    kategori = "BIGPACK" if berat_kg >= BIGPACK_THRESHOLD_KG else "REGPACK"
+    row = row_big if kategori == "BIGPACK" else row_reg
+    if row is None:
+        return kategori, None
+    return kategori, float(row["Tarif per kg"])
+
+
+def hitung_ongkir_prorata(berat_kg: float, tarif_per_kg: float):
+    """Ongkir per satuan barang, dibagi rata per gram (tanpa pembulatan & tanpa minimum 1kg).
+    Dipakai untuk harga pricelist per satuan supaya barang ringan (misal pulpen 10gr) wajar."""
+    return berat_kg * tarif_per_kg
+
+
+def bulatkan_harga(x: float, kelipatan: int = 100):
+    """Bulatkan ke atas ke kelipatan Rp100 supaya harga pricelist rapi."""
+    return math.ceil(x / kelipatan) * kelipatan
+
+
 def cari_district(nama_dicari, df_regpack, df_bigpack):
     """Fuzzy match nama kecamatan/kota ke daftar Destination District di kedua tabel."""
     semua_district = pd.concat([
@@ -130,7 +150,7 @@ except Exception as e:
     )
     st.stop()
 
-for col in ["Harga Dasar", "Berat (kg)"]:
+for col in ["Harga Dasar", "Berat (gram)"]:
     if col in df_produk.columns:
         df_produk[col] = pd.to_numeric(df_produk[col], errors="coerce")
 for col in ["Tarif per kg"]:
@@ -175,7 +195,7 @@ with tab_hitung:
     qty = st.number_input("Qty", min_value=1, value=1, step=1)
 
     if produk_terpilih is not None and district_terpilih:
-        berat_satuan = produk_terpilih["Berat (kg)"]
+        berat_satuan = produk_terpilih["Berat (gram)"]  # gram per satuan jual
         harga_dasar = produk_terpilih["Harga Dasar"]
 
         if pd.isna(berat_satuan):
@@ -184,7 +204,7 @@ with tab_hitung:
                 "Isi dulu di tab 'Kelola Produk' supaya ongkir bisa dihitung."
             )
         else:
-            berat_total = berat_satuan * qty
+            berat_total = berat_satuan * qty / 1000  # konversi gram -> kg
             row_reg = get_district_row(district_terpilih, df_regpack)
             row_big = get_district_row(district_terpilih, df_bigpack)
             kategori, billable, tarif, ongkir = hitung_ongkir(berat_total, row_reg, row_big)
@@ -195,26 +215,46 @@ with tab_hitung:
                     "Cek kembali data ongkir."
                 )
             else:
-                total_harga = (harga_dasar * qty) + ongkir
-                harga_per_unit = total_harga / qty
+                # (A) Harga per satuan untuk pricelist: ongkir dibagi rata per gram
+                berat_unit_kg = berat_satuan / 1000
+                ongkir_prorata_unit = hitung_ongkir_prorata(berat_unit_kg, tarif)
+                harga_unit_pricelist = bulatkan_harga(harga_dasar + ongkir_prorata_unit)
+
+                # (B) Estimasi ongkir aktual untuk pesanan ini (dibulatkan ke atas, min 1kg)
+                total_harga_aktual = (harga_dasar * qty) + ongkir
 
                 st.success("Perhitungan berhasil")
+
+                st.markdown("#### 🏷️ Harga per satuan (untuk pricelist)")
+                p1, p2, p3 = st.columns(3)
+                p1.metric("Harga dasar", f"Rp{harga_dasar:,.0f}")
+                p2.metric("Ongkir per satuan", f"Rp{ongkir_prorata_unit:,.0f}",
+                          help=f"{berat_satuan:,.0f} gram x Rp{tarif:,.0f}/kg, dibagi rata per gram")
+                p3.metric("Harga jual per satuan", f"Rp{harga_unit_pricelist:,.0f}")
+
+                st.markdown("#### 🚚 Estimasi ongkir pesanan ini (untuk quotation)")
                 c1, c2, c3, c4 = st.columns(4)
                 c1.metric("Kategori", kategori)
-                c2.metric("Berat ditagih", f"{billable} kg")
+                c2.metric("Berat ditagih", f"{billable} kg",
+                          help=f"Berat asli {berat_total * 1000:,.0f} gram, dibulatkan ke atas (min. {MIN_BILLABLE_KG} kg)")
                 c3.metric("Tarif/kg", f"Rp{tarif:,.0f}")
-                c4.metric("Ongkir total", f"Rp{ongkir:,.0f}")
+                c4.metric("Ongkir aktual", f"Rp{ongkir:,.0f}")
 
                 st.divider()
-                cc1, cc2 = st.columns(2)
-                cc1.metric("Harga jual per unit", f"Rp{harga_per_unit:,.0f}")
-                cc2.metric(f"Total untuk qty {qty}", f"Rp{total_harga:,.0f}")
+                st.metric(f"Total pesanan (qty {qty}) dengan ongkir aktual", f"Rp{total_harga_aktual:,.0f}")
+                if ongkir > ongkir_prorata_unit * qty:
+                    st.caption(
+                        f"ℹ️ Ongkir aktual lebih besar dari ongkir per-gram x qty "
+                        f"(Rp{ongkir_prorata_unit * qty:,.0f}) karena berat pesanan masih di bawah "
+                        f"minimum {MIN_BILLABLE_KG} kg atau dibulatkan ke atas. Pertimbangkan minimal order."
+                    )
 
 # ---------------------------------------------------------------------------
 # TAB 2: Generate Pricelist per Kota
 # ---------------------------------------------------------------------------
 with tab_pricelist:
     st.subheader("Generate harga semua produk untuk 1 kota tujuan")
+    st.caption("Ongkir dibagi rata per gram dari tarif standar per 1 kg (tanpa minimum 1 kg), harga dibulatkan ke atas kelipatan Rp100.")
 
     cari_d2 = st.text_input("Kota/kecamatan tujuan", key="pricelist_district",
                              placeholder="misal: surabaya")
@@ -231,14 +271,15 @@ with tab_pricelist:
 
         hasil_rows = []
         for _, p in df_produk.iterrows():
-            if pd.isna(p["Berat (kg)"]):
+            if pd.isna(p["Berat (gram)"]):
                 hasil_rows.append({
                     "Kode": p["Kode"], "Nama Produk": p["Nama Produk"],
                     "Kategori Ongkir": "-", "Harga Jual": None,
                     "Catatan": "Berat belum diisi",
                 })
                 continue
-            kategori, billable, tarif, ongkir = hitung_ongkir(p["Berat (kg)"], row_reg2, row_big2)
+            berat_unit_kg = p["Berat (gram)"] / 1000
+            kategori, tarif = pilih_tarif(berat_unit_kg, row_reg2, row_big2)
             if tarif is None:
                 hasil_rows.append({
                     "Kode": p["Kode"], "Nama Produk": p["Nama Produk"],
@@ -246,10 +287,15 @@ with tab_pricelist:
                     "Catatan": f"Kecamatan tidak ada di tabel {kategori}",
                 })
             else:
-                harga_jual = p["Harga Dasar"] + ongkir
+                ongkir_unit = hitung_ongkir_prorata(berat_unit_kg, tarif)
+                harga_jual = bulatkan_harga(p["Harga Dasar"] + ongkir_unit)
                 hasil_rows.append({
                     "Kode": p["Kode"], "Nama Produk": p["Nama Produk"],
-                    "Kategori Ongkir": kategori, "Harga Jual": harga_jual,
+                    "Berat (gram)": p["Berat (gram)"],
+                    "Kategori Ongkir": kategori,
+                    "Harga Dasar": p["Harga Dasar"],
+                    "Ongkir/satuan": round(ongkir_unit),
+                    "Harga Jual": harga_jual,
                     "Catatan": "",
                 })
 
@@ -266,7 +312,7 @@ with tab_produk:
     st.subheader("Tambah / edit produk")
     st.caption(
         "Produk boleh ditambahkan sebelum beratnya diketahui — kosongkan kolom "
-        "'Berat (kg)' dan isi belakangan. Selama berat kosong, harga ongkirnya "
+        "'Berat (gram)' dan isi belakangan. Isi dalam GRAM (misal pulpen 10, kertas 1 dus 12000). Selama berat kosong, harga ongkirnya "
         "belum bisa dihitung."
     )
 
@@ -276,7 +322,7 @@ with tab_produk:
         use_container_width=True,
         column_config={
             "Harga Dasar": st.column_config.NumberColumn(format="Rp%d"),
-            "Berat (kg)": st.column_config.NumberColumn(format="%.3f kg"),
+            "Berat (gram)": st.column_config.NumberColumn(format="%d gr"),
         },
         key="editor_produk",
     )
