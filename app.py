@@ -7,6 +7,17 @@ menentukan kategori pengiriman REGPACK (<10kg) atau BIGPACK (>=10kg).
 
 Data disimpan di Google Sheets (3 tab): Produk, REGPACK, BIGPACK.
 Lihat README.md untuk cara setup Google Sheets & credentials.
+
+Changelog perbaikan:
+- Validasi 'Harga Dasar' kosong (sebelumnya hanya berat yang dicek -> bisa crash/NaN)
+- Simpan produk: buang baris kosong, wajib ada 'Nama Produk', NaN ditulis sebagai
+  sel kosong ke Sheets, error handling saat simpan (sebelumnya gagal diam-diam)
+- Opsi radio dijamin unik (nama produk/kecamatan duplikat tidak bikin pilihan kabur)
+- Helper fmt_rp() supaya format Rupiah konsisten & aman dari NaN
+- Loading spinner + info jumlah data yang terbaca, tombol 'Muat ulang data'
+- Tab Pricelist: produk tanpa harga dasar tidak lagi crash math.ceil(NaN),
+  tetapi ditandai 'Harga dasar belum diisi'
+- Penjelasan rumus yang lebih jelas di setiap tab
 """
 
 import math
@@ -26,6 +37,20 @@ MIN_BILLABLE_KG = 1         # minimum ongkir dihitung 1kg
 
 PRODUK_COLS = ["Kode", "Nama Produk", "Kategori", "Harga Dasar", "Berat (gram)"]
 RATE_COLS = ["Destination District", "Pulau", "Tarif per kg"]
+
+
+# ---------------------------------------------------------------------------
+# Helper umum
+# ---------------------------------------------------------------------------
+
+def fmt_rp(x) -> str:
+    """Format angka jadi 'Rp12.500'. Aman terhadap NaN/None."""
+    try:
+        if x is None or pd.isna(x):
+            return "-"
+        return f"Rp{float(x):,.0f}"
+    except (TypeError, ValueError):
+        return "-"
 
 
 # ---------------------------------------------------------------------------
@@ -56,13 +81,24 @@ def load_sheet(name, expected_cols):
     df = pd.DataFrame(records)
     if df.empty:
         df = pd.DataFrame(columns=expected_cols)
+    else:
+        # pastikan semua kolom ekspektasi ada ( Sheets bisa kehilangan kolom
+        # yang isinya semua kosong )
+        for c in expected_cols:
+            if c not in df.columns:
+                df[c] = None
     return df
 
 
 def save_produk(df: pd.DataFrame):
     ws = _ws("Produk")
+
+    # normalisasi: NaN -> "" supaya tidak tertulis 'nan' di Sheets
+    out = df[PRODUK_COLS].copy()
+    out = out.where(pd.notna(out), "")
+
     ws.clear()
-    ws.update([PRODUK_COLS] + df[PRODUK_COLS].astype(object).values.tolist())
+    ws.update([PRODUK_COLS] + out.astype(object).values.tolist())
     st.cache_data.clear()
 
 
@@ -133,6 +169,18 @@ def cari_produk(nama_dicari, df_produk):
     return matches
 
 
+def opsi_unik(matches):
+    """Ambil label pilihan dari hasil fuzzy match, dijamin unik & urut skor."""
+    seen = set()
+    hasil = []
+    for m in matches:
+        label = m[0]
+        if label not in seen:
+            seen.add(label)
+            hasil.append(label)
+    return hasil
+
+
 # ---------------------------------------------------------------------------
 # UI
 # ---------------------------------------------------------------------------
@@ -140,9 +188,10 @@ def cari_produk(nama_dicari, df_produk):
 st.title("📦 TTS Price List — Harga Jual + Ongkir")
 
 try:
-    df_produk = load_sheet("Produk", PRODUK_COLS)
-    df_regpack = load_sheet("REGPACK", RATE_COLS)
-    df_bigpack = load_sheet("BIGPACK", RATE_COLS)
+    with st.spinner("Memuat data dari Google Sheets..."):
+        df_produk = load_sheet("Produk", PRODUK_COLS)
+        df_regpack = load_sheet("REGPACK", RATE_COLS)
+        df_bigpack = load_sheet("BIGPACK", RATE_COLS)
 except Exception as e:
     st.error(
         "Gagal konek ke Google Sheets. Cek kembali SHEET_ID dan credentials di "
@@ -156,6 +205,17 @@ for col in ["Harga Dasar", "Berat (gram)"]:
 for col in ["Tarif per kg"]:
     df_regpack[col] = pd.to_numeric(df_regpack[col], errors="coerce")
     df_bigpack[col] = pd.to_numeric(df_bigpack[col], errors="coerce")
+
+top1, top2 = st.columns([4, 1])
+with top1:
+    st.caption(
+        f"📊 Terbaca: **{len(df_produk)}** produk · "
+        f"**{len(df_regpack)}** kecamatan REGPACK · **{len(df_bigpack)}** kecamatan BIGPACK"
+    )
+with top2:
+    if st.button("🔄 Muat ulang data", help="Kosongkan cache & ambil ulang data dari Google Sheets"):
+        st.cache_data.clear()
+        st.rerun()
 
 tab_hitung, tab_pricelist, tab_produk = st.tabs(
     ["🧮 Hitung Harga", "📋 Generate Pricelist per Kota", "🗂️ Kelola Produk"]
@@ -175,7 +235,7 @@ with tab_hitung:
         if cari_p:
             hasil_p = cari_produk(cari_p, df_produk)
             if hasil_p:
-                opsi_p = [h[0] for h in hasil_p]
+                opsi_p = opsi_unik(hasil_p)
                 pilihan_p = st.radio("Pilih produk yang cocok:", opsi_p, index=0)
                 produk_terpilih = df_produk[df_produk["Nama Produk"] == pilihan_p].iloc[0]
             else:
@@ -187,7 +247,7 @@ with tab_hitung:
         if cari_d:
             _, hasil_d = cari_district(cari_d, df_regpack, df_bigpack)
             if hasil_d:
-                opsi_d = [h[0] for h in hasil_d]
+                opsi_d = opsi_unik(hasil_d)
                 district_terpilih = st.radio("Pilih kecamatan yang cocok:", opsi_d, index=0)
             else:
                 st.warning("Kecamatan tidak ditemukan di data ongkir.")
@@ -202,6 +262,11 @@ with tab_hitung:
             st.error(
                 f"Berat produk '{produk_terpilih['Nama Produk']}' belum diisi. "
                 "Isi dulu di tab 'Kelola Produk' supaya ongkir bisa dihitung."
+            )
+        elif pd.isna(harga_dasar):
+            st.error(
+                f"Harga dasar produk '{produk_terpilih['Nama Produk']}' belum diisi. "
+                "Isi dulu di tab 'Kelola Produk'."
             )
         else:
             berat_total = berat_satuan * qty / 1000  # konversi gram -> kg
@@ -227,25 +292,25 @@ with tab_hitung:
 
                 st.markdown("#### 🏷️ Harga per satuan (untuk pricelist)")
                 p1, p2, p3 = st.columns(3)
-                p1.metric("Harga dasar", f"Rp{harga_dasar:,.0f}")
-                p2.metric("Ongkir per satuan", f"Rp{ongkir_prorata_unit:,.0f}",
-                          help=f"{berat_satuan:,.0f} gram x Rp{tarif:,.0f}/kg, dibagi rata per gram")
-                p3.metric("Harga jual per satuan", f"Rp{harga_unit_pricelist:,.0f}")
+                p1.metric("Harga dasar", fmt_rp(harga_dasar))
+                p2.metric("Ongkir per satuan", fmt_rp(ongkir_prorata_unit),
+                          help=f"{berat_satuan:,.0f} gram x {fmt_rp(tarif)}/kg, dibagi rata per gram")
+                p3.metric("Harga jual per satuan", fmt_rp(harga_unit_pricelist))
 
                 st.markdown("#### 🚚 Estimasi ongkir pesanan ini (untuk quotation)")
                 c1, c2, c3, c4 = st.columns(4)
                 c1.metric("Kategori", kategori)
                 c2.metric("Berat ditagih", f"{billable} kg",
                           help=f"Berat asli {berat_total * 1000:,.0f} gram, dibulatkan ke atas (min. {MIN_BILLABLE_KG} kg)")
-                c3.metric("Tarif/kg", f"Rp{tarif:,.0f}")
-                c4.metric("Ongkir aktual", f"Rp{ongkir:,.0f}")
+                c3.metric("Tarif/kg", fmt_rp(tarif))
+                c4.metric("Ongkir aktual", fmt_rp(ongkir))
 
                 st.divider()
-                st.metric(f"Total pesanan (qty {qty}) dengan ongkir aktual", f"Rp{total_harga_aktual:,.0f}")
+                st.metric(f"Total pesanan (qty {qty}) dengan ongkir aktual", fmt_rp(total_harga_aktual))
                 if ongkir > ongkir_prorata_unit * qty:
                     st.caption(
                         f"ℹ️ Ongkir aktual lebih besar dari ongkir per-gram x qty "
-                        f"(Rp{ongkir_prorata_unit * qty:,.0f}) karena berat pesanan masih di bawah "
+                        f"({fmt_rp(ongkir_prorata_unit * qty)}) karena berat pesanan masih di bawah "
                         f"minimum {MIN_BILLABLE_KG} kg atau dibulatkan ke atas. Pertimbangkan minimal order."
                     )
 
@@ -254,7 +319,11 @@ with tab_hitung:
 # ---------------------------------------------------------------------------
 with tab_pricelist:
     st.subheader("Generate harga semua produk untuk 1 kota tujuan")
-    st.caption("Ongkir dibagi rata per gram dari tarif standar per 1 kg (tanpa minimum 1 kg), harga dibulatkan ke atas kelipatan Rp100.")
+    st.caption(
+        "Ongkir dibagi rata per gram dari tarif standar per 1 kg (tanpa minimum 1 kg), "
+        f"harga dibulatkan ke atas kelipatan Rp100. Kategori ongkir per produk ditentukan "
+        f"dari berat 1 satuan (>= {BIGPACK_THRESHOLD_KG} kg -> BIGPACK)."
+    )
 
     cari_d2 = st.text_input("Kota/kecamatan tujuan", key="pricelist_district",
                              placeholder="misal: surabaya")
@@ -262,8 +331,10 @@ with tab_pricelist:
     if cari_d2:
         _, hasil_d2 = cari_district(cari_d2, df_regpack, df_bigpack)
         if hasil_d2:
-            opsi_d2 = [h[0] for h in hasil_d2]
+            opsi_d2 = opsi_unik(hasil_d2)
             district_terpilih2 = st.radio("Pilih kecamatan:", opsi_d2, index=0, key="radio_pricelist")
+        else:
+            st.warning("Kecamatan tidak ditemukan di data ongkir.")
 
     if district_terpilih2:
         row_reg2 = get_district_row(district_terpilih2, df_regpack)
@@ -276,6 +347,13 @@ with tab_pricelist:
                     "Kode": p["Kode"], "Nama Produk": p["Nama Produk"],
                     "Kategori Ongkir": "-", "Harga Jual": None,
                     "Catatan": "Berat belum diisi",
+                })
+                continue
+            if pd.isna(p["Harga Dasar"]):
+                hasil_rows.append({
+                    "Kode": p["Kode"], "Nama Produk": p["Nama Produk"],
+                    "Kategori Ongkir": "-", "Harga Jual": None,
+                    "Catatan": "Harga dasar belum diisi",
                 })
                 continue
             berat_unit_kg = p["Berat (gram)"] / 1000
@@ -332,6 +410,23 @@ with tab_produk:
         if missing:
             st.error(f"Kolom hilang: {missing}")
         else:
-            save_produk(edited)
-            st.success("Tersimpan ke Google Sheets.")
-            st.rerun()
+            # buang baris yang benar-benar kosong / tanpa nama produk
+            bersih = edited.copy()
+            bersih["Nama Produk"] = bersih["Nama Produk"].astype(str).str.strip()
+            tanpa_nama = bersih[bersih["Nama Produk"].isin(["", "nan", "None"])]
+            if not tanpa_nama.empty:
+                st.warning(
+                    f"{len(tanpa_nama)} baris tanpa 'Nama Produk' tidak disimpan."
+                )
+                bersih = bersih[~bersih["Nama Produk"].isin(["", "nan", "None"])]
+
+            if bersih.empty:
+                st.error("Tidak ada produk tersisa untuk disimpan.")
+            else:
+                try:
+                    save_produk(bersih)
+                except Exception as e:
+                    st.error(f"Gagal menyimpan ke Google Sheets: {e}")
+                else:
+                    st.success(f"Tersimpan: {len(bersih)} produk ke Google Sheets.")
+                    st.rerun()
