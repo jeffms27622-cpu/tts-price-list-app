@@ -89,6 +89,35 @@ html, body, [class*="css"] { font-family: 'Plus Jakarta Sans', sans-serif; -webk
 .price-info-box span { color: #f0c040; font-size: 1rem; }
 .pwd-box { background: white; border-radius: 16px; padding: 28px 24px; border: 1px solid #e0e8f0; border-top: 4px solid #B8860B; box-shadow: 0 6px 24px rgba(0,40,85,0.12); }
 hr { border: none !important; background: linear-gradient(90deg, transparent, #B8860B, transparent) !important; height: 2px !important; margin: 14px 0 !important; }
+
+/* ── FIX KONTRAS: label, caption, tab, radio, markdown kadang ketimpa warna
+   tema default Streamlit (jadi pudar/putih di atas background terang kita) ── */
+section.main .stTextInput > label, section.main .stTextInput label,
+section.main .stSelectbox > label, section.main .stSelectbox label,
+section.main .stNumberInput > label, section.main .stNumberInput label,
+section.main .stRadio > label, section.main .stRadio label,
+div[data-testid="stForm"] label, div[class*="stTextInput"] label,
+div[class*="stSelectbox"] label, div[class*="stNumberInput"] label {
+    font-weight: 600 !important; font-size: 0.78rem !important;
+    letter-spacing: 0.06em !important; text-transform: uppercase !important;
+    color: #002855 !important; opacity: 1 !important; visibility: visible !important;
+}
+.stTextInput > div > div > input::placeholder,
+.stNumberInput > div > div > input::placeholder {
+    color: #9fb3c8 !important; opacity: 1 !important;
+}
+section.main .stMarkdown p, section.main .stMarkdown strong,
+section.main [data-testid="stMarkdownContainer"] p,
+section.main [data-testid="stMarkdownContainer"] strong { color: #1e1e1e !important; }
+section.main [data-testid="stCaptionContainer"] p, section.main .stCaption p { color: #5a7a9a !important; }
+section.main [data-testid="stExpander"] p, section.main [data-testid="stExpander"] span,
+section.main [data-testid="stExpander"] strong, section.main [data-testid="stExpander"] li { color: #1e1e1e !important; }
+[data-testid="stTabs"] button p, [data-testid="stTabs"] [data-baseweb="tab"] p {
+    color: #002855 !important; font-weight: 700 !important;
+}
+[data-testid="stRadio"] label p, [data-baseweb="radio"] label { color: #1e1e1e !important; }
+[data-testid="stAlert"] p { color: #1e1e1e !important; }
+[data-testid="stMetricLabel"] { color: #5a7a9a !important; }
 </style>
 """, unsafe_allow_html=True)
 
