@@ -449,7 +449,12 @@ def generate_pdf(no_surat, nama_cust, pic, kota_tujuan, df_order, subtotal, ppn,
 
     pdf1 = PenawaranPDF(total_pages=99); _render(pdf1); total_pages = pdf1.page
     pdf2 = PenawaranPDF(total_pages=total_pages); _render(pdf2)
-    return pdf2.output(dest='S').encode('latin-1')
+    out = pdf2.output()
+    # fpdf2 versi baru: output() langsung balikin bytearray. Versi lama: perlu
+    # dest='S' lalu di-encode. Ditangani dua-duanya biar aman di versi mana pun.
+    if isinstance(out, (bytes, bytearray)):
+        return bytes(out)
+    return out.encode('latin-1')
 
 
 # =========================================================
