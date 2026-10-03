@@ -765,23 +765,31 @@ with tab_dash:
 
                     f_df = pd.DataFrame(items)
                     if not f_df.empty:
+                        # ONGKIR TIDAK DITAMPILKAN SEBAGAI BARIS TERPISAH.
+                        # Ongkir dibagi rata (proporsional terhadap nilai barang) ke
+                        # harga masing-masing item, supaya di PDF/Excel harga tiap
+                        # barang SUDAH TERMASUK ongkos kirim.
                         ongkir_tersimpan = float(row["Ongkir"]) if row["Ongkir"] else 0.0
-                        ongkir_row = pd.DataFrame([{
-                            "Nama Barang": f"Ongkos Kirim ke {row['Kota Tujuan']}",
-                            "Qty": 1, "Harga": ongkir_tersimpan, "Satuan": "-",
-                            "Total_Row": ongkir_tersimpan,
-                        }])
-                        f_df_cetak = pd.concat([f_df, ongkir_row], ignore_index=True)
+                        subt_barang = f_df["Total_Row"].sum()
+                        if ongkir_tersimpan > 0 and subt_barang > 0:
+                            f_df = f_df.copy()
+                            alokasi = (f_df["Total_Row"] / subt_barang * ongkir_tersimpan).round(0)
+                            # selisih pembulatan rupiah ditambahkan ke item terbesar
+                            selisih = ongkir_tersimpan - alokasi.sum()
+                            if selisih != 0:
+                                alokasi.loc[f_df["Total_Row"].idxmax()] += selisih
+                            f_df["Total_Row"] = f_df["Total_Row"] + alokasi
+                            f_df["Harga"] = (f_df["Total_Row"] / f_df["Qty"]).round(0)
 
-                        subt = f_df_cetak["Total_Row"].sum()
+                        subt = f_df["Total_Row"].sum()
                         tax = subt * PPN_RATE
                         gtot = subt + tax
 
-                        st.dataframe(f_df_cetak[["Nama Barang", "Qty", "Satuan", "Harga", "Total_Row"]],
+                        st.dataframe(f_df[["Nama Barang", "Qty", "Satuan", "Harga", "Total_Row"]],
                                      use_container_width=True, hide_index=True)
 
                         t1, t2 = st.columns(2)
-                        t1.metric("Subtotal (barang + ongkir)", fmt_rp(subt))
+                        t1.metric("Subtotal (harga sudah termasuk ongkir)", fmt_rp(subt))
                         t2.metric("Grand Total", fmt_rp(gtot))
 
                         no_s = st.text_input("📄 Nomor Surat:", value="/S-TTS/X/2026", key=f"ns_{real_row}")
@@ -790,11 +798,11 @@ with tab_dash:
 
                         b1, b2 = st.columns(2)
                         pdf_data = generate_pdf(no_s, row["Customer"], row["UP"], row["Kota Tujuan"],
-                                                 f_df_cetak, subt, tax, gtot)
+                                                 f_df, subt, tax, gtot)
                         b1.download_button("📩 PDF", pdf_data, file_name=f"Quo_Nasional_{safe_cust}_{waktu_file}.pdf",
                                             use_container_width=True, type="primary", key=f"pdf_{real_row}")
                         xls_data = generate_excel(no_s, row["Customer"], row["UP"], row["Kota Tujuan"],
-                                                   f_df_cetak, subt, tax, gtot)
+                                                   f_df, subt, tax, gtot)
                         b2.download_button("📊 Excel", xls_data, file_name=f"Quo_Nasional_{safe_cust}_{waktu_file}.xlsx",
                                             use_container_width=True, key=f"xls_{real_row}")
 
