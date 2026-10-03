@@ -239,6 +239,13 @@ def load_db():
 # =========================================================
 # HELPER PENCARIAN
 # =========================================================
+def safe_pdf_text(s) -> str:
+    """FPDF (font standar Arial) cuma bisa encode karakter latin-1. Emoji atau
+    karakter unicode lain (kutip pintar, dsb) di nama produk/pelanggan harus
+    dibuang dulu supaya tidak crash saat generate PDF."""
+    return str(s).encode("latin-1", errors="ignore").decode("latin-1")
+
+
 def fmt_rp(x) -> str:
     try:
         if x is None or pd.isna(x):
@@ -369,10 +376,10 @@ def generate_pdf(no_surat, nama_cust, pic, kota_tujuan, df_order, subtotal, ppn,
         pdf.set_x(10); pdf.set_font('Arial', 'B', 7.5); pdf.set_text_color(*COLOR_GOLD)
         pdf.cell(90, 5, "DITUJUKAN KEPADA:", ln=1)
         pdf.set_x(10); pdf.set_font('Arial', 'B', 13); pdf.set_text_color(*COLOR_NAVY)
-        pdf.cell(90, 7, str(nama_cust).upper(), ln=1)
+        pdf.cell(90, 7, safe_pdf_text(nama_cust).upper(), ln=1)
         pdf.set_x(10); pdf.set_font('Arial', '', 9); pdf.set_text_color(*COLOR_TEXT)
-        pdf.cell(90, 5, f"U/P: {pic}", ln=1)
-        pdf.set_x(10); pdf.cell(90, 5, f"Tujuan Kirim: {kota_tujuan}", ln=1)
+        pdf.cell(90, 5, f"U/P: {safe_pdf_text(pic)}", ln=1)
+        pdf.set_x(10); pdf.cell(90, 5, f"Tujuan Kirim: {safe_pdf_text(kota_tujuan)}", ln=1)
         pdf.ln(6)
 
         draw_table_header(pdf); pdf.set_font('Arial', '', 9); pdf.set_text_color(*COLOR_TEXT)
@@ -382,9 +389,9 @@ def generate_pdf(no_surat, nama_cust, pic, kota_tujuan, df_order, subtotal, ppn,
             pdf.set_fill_color(240, 245, 252) if i % 2 == 0 else pdf.set_fill_color(255, 255, 255)
             pdf.set_draw_color(180, 195, 215); pdf.set_line_width(0.2)
             pdf.cell(10, 8, str(i + 1), border=1, align='C', fill=True)
-            pdf.cell(76, 8, f" {str(row['Nama Barang'])}", border=1, align='L', fill=True)
+            pdf.cell(76, 8, f" {safe_pdf_text(row['Nama Barang'])}", border=1, align='L', fill=True)
             pdf.cell(16, 8, str(row['Qty']), border=1, align='C', fill=True)
-            pdf.cell(18, 8, str(row['Satuan']), border=1, align='C', fill=True)
+            pdf.cell(18, 8, safe_pdf_text(row['Satuan']), border=1, align='C', fill=True)
             pdf.cell(30, 8, f"Rp {row['Harga']:,.0f}", border=1, align='R', fill=True)
             pdf.cell(30, 8, f"Rp {row['Total_Row']:,.0f}", border=1, align='R', fill=True)
             pdf.ln()
@@ -755,7 +762,7 @@ with tab_dash:
                     if not f_df.empty:
                         ongkir_tersimpan = float(row["Ongkir"]) if row["Ongkir"] else 0.0
                         ongkir_row = pd.DataFrame([{
-                            "Nama Barang": f"🚚 Ongkos Kirim ke {row['Kota Tujuan']}",
+                            "Nama Barang": f"Ongkos Kirim ke {row['Kota Tujuan']}",
                             "Qty": 1, "Harga": ongkir_tersimpan, "Satuan": "-",
                             "Total_Row": ongkir_tersimpan,
                         }])
