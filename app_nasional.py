@@ -819,7 +819,19 @@ with tab_dash:
                             if selisih != 0:
                                 alokasi.loc[f_df_cetak["Total_Row"].idxmax()] += selisih
                             f_df_cetak["Total_Row"] = f_df_cetak["Total_Row"] + alokasi
-                            f_df_cetak["Harga"] = (f_df_cetak["Total_Row"] / f_df_cetak["Qty"]).round(0)
+
+                        # Bulatkan Total_Row tiap barang ke kelipatan Rp500 terdekat supaya
+                        # harga tidak ganjil (misal Rp582.282), lalu selisih pembulatan
+                        # (biasanya cuma receh) ditaruh di barang dengan nilai terbesar
+                        # supaya Grand Total yang dibayar customer tetap akurat.
+                        ROUNDING_STEP = 500
+                        target_total = f_df_cetak["Total_Row"].sum()
+                        f_df_cetak["Total_Row"] = (f_df_cetak["Total_Row"] / ROUNDING_STEP).round(0) * ROUNDING_STEP
+                        selisih_bulat = target_total - f_df_cetak["Total_Row"].sum()
+                        if selisih_bulat != 0:
+                            idx_max = f_df_cetak["Total_Row"].idxmax()
+                            f_df_cetak.loc[idx_max, "Total_Row"] += selisih_bulat
+                        f_df_cetak["Harga"] = (f_df_cetak["Total_Row"] / f_df_cetak["Qty"]).round(0)
 
                         subt = f_df_cetak["Total_Row"].sum()
                         tax = subt * PPN_RATE
