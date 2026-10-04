@@ -313,6 +313,15 @@ def item_key(row_idx, nama_barang):
     return f"n{row_idx}_{h}"
 
 
+def clear_row_state(real_row):
+    """Buang semua session_state widget (harga/satuan/qty/pos/mode/berat) milik
+    1 baris penawaran, dipanggil setelah simpan supaya form edit mulai bersih lagi
+    dari data terbaru (bukan nilai lama yang sempat diubah lalu dibatalkan)."""
+    token = f"_n{real_row}_"
+    for k in [k for k in list(st.session_state.keys()) if token in k]:
+        del st.session_state[k]
+
+
 # =========================================================
 # PDF
 # =========================================================
@@ -804,6 +813,130 @@ with tab_dash:
                         f"👤 UP: **{row['UP']}** &nbsp;|&nbsp; 📞 **{row['WA']}** &nbsp;|&nbsp; "
                         f"📍 **{row['Kota Tujuan']}** &nbsp;|&nbsp; 📦 {row['Kategori Ongkir']}"
                     )
+
+                    # ----------------------------------------------------------------
+                    # EDIT ITEM: qty, satuan, harga, urutan, hapus, tambah barang baru
+                    # ----------------------------------------------------------------
+                    st.markdown("**📝 Edit Daftar Barang**")
+                    st.caption("Ubah Qty/Harga/Unit, atau pakai Kalkulasi untuk konversi satuan (Lusin/Dus/dll). "
+                               "Centang 🗑️ untuk hapus. Ongkir otomatis dihitung ulang dari berat total setelah disimpan.")
+
+                    for i, r in enumerate(items):
+                        nama_item = r["Nama Barang"]
+                        u_k = item_key(real_row, nama_item)
+                        row_master = df_barang[df_barang["Nama Barang"] == nama_item]
+                        harga_master = float(row_master["Harga"].values[0]) if not row_master.empty else float(r.get("Harga", 0))
+                        satuan_master = str(row_master["Satuan"].values[0]).strip() if not row_master.empty else str(r.get("Satuan", "Pcs"))
+                        berat_master = float(row_master["Berat (gram)"].values[0]) if not row_master.empty and pd.notna(row_master["Berat (gram)"].values[0]) else float(r.get("Berat (gram)", 0))
+
+                        st.session_state.setdefault(f"h_{u_k}", float(r.get("Harga", 0)))
+                        st.session_state.setdefault(f"s_{u_k}", str(r.get("Satuan", "Pcs")))
+                        st.session_state.setdefault(f"q_{u_k}", int(r.get("Qty", 1)))
+                        st.session_state.setdefault(f"p_{u_k}", float(i + 1))
+                        st.session_state.setdefault(f"m_{u_k}", "Pcs/Tetap")
+                        st.session_state.setdefault(f"isi_{u_k}", 10)
+                        st.session_state.setdefault(f"br_{u_k}", float(r.get("Berat (gram)", berat_master)))
+
+                    temp_up = []
+                    list_mode = ["Pcs/Tetap", "Lusin (12)", "Dus", "Box", "Pack", "Set", "Rim"]
+
+                    for i, r in enumerate(items):
+                        nama_item = r["Nama Barang"]
+                        u_k = item_key(real_row, nama_item)
+                        row_master = df_barang[df_barang["Nama Barang"] == nama_item]
+                        harga_master = float(row_master["Harga"].values[0]) if not row_master.empty else float(r.get("Harga", 0))
+                        satuan_master = str(row_master["Satuan"].values[0]).strip() if not row_master.empty else str(r.get("Satuan", "Pcs"))
+                        berat_master = float(row_master["Berat (gram)"].values[0]) if not row_master.empty and pd.notna(row_master["Berat (gram)"].values[0]) else float(r.get("Berat (gram)", 0))
+
+                        with st.container(border=True):
+                            harga_tersimpan = st.session_state.get(f"h_{u_k}")
+                            satuan_tersimpan = st.session_state.get(f"s_{u_k}")
+                            berat_tersimpan = st.session_state.get(f"br_{u_k}")
+                            st.markdown(
+                                f"<span style='color:#002855;font-weight:700;'>{nama_item}</span><br>"
+                                f"<span style='color:#5a7a9a;font-size:0.75rem;'>📋 Master: Rp {harga_master:,.0f} / {satuan_master} "
+                                f"&middot; {berat_master:,.0f} gram</span><br>"
+                                f"<span style='color:#B8860B;font-size:0.75rem;font-weight:600;'>💾 Tersimpan: Rp {harga_tersimpan:,.0f} / "
+                                f"{satuan_tersimpan} &middot; {berat_tersimpan:,.0f} gram</span>",
+                                unsafe_allow_html=True
+                            )
+                            c1, c2 = st.columns(2)
+                            mode = c1.selectbox("Kalkulasi", list_mode, key=f"m_{u_k}")
+                            nq = c2.number_input("Qty", min_value=1, step=1, key=f"q_{u_k}")
+
+                            if mode in ["Dus", "Box", "Pack", "Set"]:
+                                st.number_input(f"Isi per {mode}", min_value=1, step=1, key=f"isi_{u_k}")
+
+                            if mode != "Pcs/Tetap":
+                                if mode == "Lusin (12)":
+                                    mult_apply = 12; sat_kalkulasi = "Lusin"
+                                elif mode == "Rim":
+                                    mult_apply = 1; sat_kalkulasi = "Rim"
+                                else:
+                                    mult_apply = st.session_state.get(f"isi_{u_k}", 10); sat_kalkulasi = mode
+                                harga_kalkulasi = int(harga_master * mult_apply)
+                                berat_kalkulasi = berat_master * mult_apply
+                                if st.button(f"▶ Apply {sat_kalkulasi} — Rp {harga_kalkulasi:,.0f} / {berat_kalkulasi:,.0f} gram",
+                                             key=f"apply_{u_k}", use_container_width=True):
+                                    st.session_state[f"h_{u_k}"] = harga_kalkulasi
+                                    st.session_state[f"s_{u_k}"] = sat_kalkulasi
+                                    st.session_state[f"br_{u_k}"] = berat_kalkulasi
+                                    st.rerun()
+
+                            c3, c4 = st.columns(2)
+                            ns = c3.text_input("Unit", key=f"s_{u_k}")
+                            nh = c4.number_input("Harga Jual", min_value=0, step=500, key=f"h_{u_k}", format="%d")
+                            c5, c6 = st.columns([2, 1])
+                            np_ = c5.number_input("Pos (urutan)", min_value=0.1, step=0.1, format="%.1f", key=f"p_{u_k}")
+                            td = c6.checkbox("🗑️ Hapus", key=f"d_{u_k}")
+                            berat_final = st.session_state.get(f"br_{u_k}", berat_master)
+                            temp_up.append({"del": td, "pos": np_, "Nama": nama_item, "Qty": nq,
+                                             "Harga": nh, "Sat": ns, "Berat": berat_final})
+
+                    st.markdown("---")
+                    opsi_tambah = df_barang[df_barang["Berat (gram)"].notna()]["Nama Barang"].tolist()
+                    add_b = st.multiselect(
+                        "➕ Tambah Barang Baru (hanya barang yang sudah ada beratnya):",
+                        options=opsi_tambah, key=f"add_new_{real_row}",
+                        placeholder="Pilih barang untuk ditambahkan..."
+                    )
+
+                    if st.button("💾 SIMPAN PERUBAHAN DATA", key=f"btn_save_{real_row}", use_container_width=True):
+                        final = sorted([x for x in temp_up if not x["del"]], key=lambda x: x["pos"])
+                        for p in add_b:
+                            rb = df_barang[df_barang["Nama Barang"] == p].iloc[0]
+                            final.append({"Nama": p, "Qty": 1, "Harga": float(rb["Harga"]),
+                                          "Sat": str(rb["Satuan"]), "Berat": float(rb["Berat (gram)"])})
+
+                        if not final:
+                            st.error("Tidak bisa menyimpan penawaran kosong (minimal 1 barang).")
+                        else:
+                            save_data = [{
+                                "Nama Barang": x["Nama"], "Qty": x["Qty"], "Harga": x["Harga"],
+                                "Satuan": x["Sat"], "Berat (gram)": x["Berat"],
+                                "Total_Row": x["Qty"] * x["Harga"],
+                            } for x in final]
+
+                            row_reg_e = get_district_row(row["Kota Tujuan"], df_reg)
+                            row_big_e = get_district_row(row["Kota Tujuan"], df_big)
+                            hasil_e = hitung_ongkir_order(save_data, row_reg_e, row_big_e)
+
+                            if hasil_e is None:
+                                st.error(f"Kecamatan '{row['Kota Tujuan']}' tidak ditemukan di tabel ongkir. "
+                                         "Perubahan tidak disimpan.")
+                            else:
+                                ws.update_cell(real_row, SHEET_HEADERS.index("Pesanan") + 1, str(save_data))
+                                ws.update_cell(real_row, SHEET_HEADERS.index("Berat Total (gram)") + 1, hasil_e["total_gram"])
+                                ws.update_cell(real_row, SHEET_HEADERS.index("Kategori Ongkir") + 1, hasil_e["kategori"])
+                                ws.update_cell(real_row, SHEET_HEADERS.index("Ongkir") + 1, hasil_e["ongkir"])
+                                clear_row_state(real_row)
+                                st.success(f"✅ Tersimpan! {len(save_data)} barang, ongkir baru Rp{hasil_e['ongkir']:,.0f} "
+                                           f"({hasil_e['kategori']}, {hasil_e['billable_kg']} kg).")
+                                time.sleep(1)
+                                st.rerun()
+
+                    st.markdown("---")
+                    st.markdown("**🖨️ Preview Quotation (harga sudah termasuk ongkir)**")
 
                     f_df = pd.DataFrame(items)
                     if not f_df.empty:
