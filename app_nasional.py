@@ -349,15 +349,19 @@ class PenawaranPDF(FPDF):
         self.cell(0, 4, f"{COMPANY_NAME}  |  {ADDR}  |  Hal. {self.page_no()} / {self.total_pages}", 0, 0, 'C')
 
 
+# Lebar kolom tabel (total HARUS 190mm = lebar halaman A4 210mm - margin kiri+kanan 10+10)
+COL_NO, COL_DESC, COL_QTY, COL_SAT, COL_HRG, COL_TOT = 10, 82, 18, 20, 30, 30
+
+
 def draw_table_header(pdf):
     pdf.set_fill_color(*COLOR_NAVY); pdf.set_text_color(255, 255, 255); pdf.set_font('Arial', 'B', 9)
     pdf.set_draw_color(*COLOR_GOLD); pdf.set_line_width(0.4)
-    pdf.cell(10, 10, 'NO', border=1, align='C', fill=True)
-    pdf.cell(76, 10, 'DESKRIPSI', border=1, align='C', fill=True)
-    pdf.cell(16, 10, 'QTY', border=1, align='C', fill=True)
-    pdf.cell(18, 10, 'SATUAN', border=1, align='C', fill=True)
-    pdf.cell(30, 10, 'HARGA', border=1, align='C', fill=True)
-    pdf.cell(30, 10, 'TOTAL', border=1, align='C', fill=True)
+    pdf.cell(COL_NO, 10, 'NO', border=1, align='C', fill=True)
+    pdf.cell(COL_DESC, 10, 'DESKRIPSI', border=1, align='C', fill=True)
+    pdf.cell(COL_QTY, 10, 'QTY', border=1, align='C', fill=True)
+    pdf.cell(COL_SAT, 10, 'SATUAN', border=1, align='C', fill=True)
+    pdf.cell(COL_HRG, 10, 'HARGA', border=1, align='C', fill=True)
+    pdf.cell(COL_TOT, 10, 'TOTAL', border=1, align='C', fill=True)
     pdf.ln()
 
 
@@ -388,12 +392,12 @@ def generate_pdf(no_surat, nama_cust, pic, kota_tujuan, df_order, subtotal, ppn,
                 pdf.add_page(); draw_table_header(pdf); pdf.set_font('Arial', '', 9); pdf.set_text_color(*COLOR_TEXT)
             pdf.set_fill_color(240, 245, 252) if i % 2 == 0 else pdf.set_fill_color(255, 255, 255)
             pdf.set_draw_color(180, 195, 215); pdf.set_line_width(0.2)
-            pdf.cell(10, 8, str(i + 1), border=1, align='C', fill=True)
-            pdf.cell(76, 8, f" {safe_pdf_text(row['Nama Barang'])}", border=1, align='L', fill=True)
-            pdf.cell(16, 8, str(row['Qty']), border=1, align='C', fill=True)
-            pdf.cell(18, 8, safe_pdf_text(row['Satuan']), border=1, align='C', fill=True)
-            pdf.cell(30, 8, f"Rp {row['Harga']:,.0f}", border=1, align='R', fill=True)
-            pdf.cell(30, 8, f"Rp {row['Total_Row']:,.0f}", border=1, align='R', fill=True)
+            pdf.cell(COL_NO, 8, str(i + 1), border=1, align='C', fill=True)
+            pdf.cell(COL_DESC, 8, f" {safe_pdf_text(row['Nama Barang'])}", border=1, align='L', fill=True)
+            pdf.cell(COL_QTY, 8, str(row['Qty']), border=1, align='C', fill=True)
+            pdf.cell(COL_SAT, 8, safe_pdf_text(row['Satuan']), border=1, align='C', fill=True)
+            pdf.cell(COL_HRG, 8, f"Rp {row['Harga']:,.0f}", border=1, align='R', fill=True)
+            pdf.cell(COL_TOT, 8, f"Rp {row['Total_Row']:,.0f}", border=1, align='R', fill=True)
             pdf.ln()
 
         pdf.ln(4); pdf.set_draw_color(*COLOR_GOLD); pdf.set_line_width(0.6)
@@ -433,10 +437,48 @@ def generate_pdf(no_surat, nama_cust, pic, kota_tujuan, df_order, subtotal, ppn,
 
         pdf.set_y(y_tc + 3); pdf.set_x(138); pdf.set_font('Arial', 'B', 8.5); pdf.set_text_color(*COLOR_GOLD)
         pdf.cell(60, 5, "Hormat Kami,", ln=1)
+
         ttd_path = "ttd_clean.png"
+        TTD_MAX_W, TTD_MAX_H = 50, 45
+        ttd_render_h = 0
         if os.path.exists(ttd_path):
-            pdf.image(ttd_path, x=133, y=pdf.get_y() + 1, w=45)
-            pdf.set_y(pdf.get_y() + 1 + 35)
+            try:
+                from PIL import Image as PILImage
+                import numpy as _np
+                ttd_img = PILImage.open(ttd_path).convert("RGBA")
+                img_to_draw = ttd_path
+
+                # Stempel: logo TTS ditumpuk transparan di belakang tanda tangan,
+                # persis seperti di topan.py.
+                if os.path.exists("logo.png"):
+                    logo_img = PILImage.open("logo.png").convert("RGBA")
+                    lw = int(ttd_img.width * 0.75)
+                    lh = int(logo_img.height * lw / logo_img.width)
+                    logo_img = logo_img.resize((lw, lh), PILImage.LANCZOS)
+                    logo_arr = _np.array(logo_img)
+                    logo_arr[:, :, 3] = (logo_arr[:, :, 3] * 0.82).astype(_np.uint8)
+                    logo_faded = PILImage.fromarray(logo_arr)
+                    lx = (ttd_img.width - lw) // 2
+                    ly = max(0, (ttd_img.height - lh) // 2)
+                    canvas = ttd_img.copy()
+                    canvas.paste(logo_faded, (lx, ly), logo_faded)
+                    tmp_path = "/tmp/ttd_stamp_combined_nasional.png"
+                    canvas.save(tmp_path)
+                    img_to_draw = tmp_path
+
+                aspect = ttd_img.height / ttd_img.width
+                render_w = TTD_MAX_W
+                render_h = render_w * aspect
+                if render_h > TTD_MAX_H:
+                    render_h = TTD_MAX_H
+                    render_w = render_h / aspect
+
+                pdf.image(img_to_draw, x=133, y=pdf.get_y() + 1, w=render_w, h=render_h)
+                ttd_render_h = render_h
+            except Exception:
+                pdf.image(ttd_path, x=133, y=pdf.get_y() + 1, w=TTD_MAX_W)
+                ttd_render_h = TTD_MAX_H
+            pdf.set_y(pdf.get_y() + max(ttd_render_h, 10) + 4)
         else:
             pdf.ln(36)
         pdf.set_x(138); pdf.set_font('Arial', 'B', 12); pdf.set_text_color(*COLOR_NAVY)
@@ -765,31 +807,23 @@ with tab_dash:
 
                     f_df = pd.DataFrame(items)
                     if not f_df.empty:
-                        # ONGKIR TIDAK DITAMPILKAN SEBAGAI BARIS TERPISAH.
-                        # Ongkir dibagi rata (proporsional terhadap nilai barang) ke
-                        # harga masing-masing item, supaya di PDF/Excel harga tiap
-                        # barang SUDAH TERMASUK ongkos kirim.
                         ongkir_tersimpan = float(row["Ongkir"]) if row["Ongkir"] else 0.0
-                        subt_barang = f_df["Total_Row"].sum()
-                        if ongkir_tersimpan > 0 and subt_barang > 0:
-                            f_df = f_df.copy()
-                            alokasi = (f_df["Total_Row"] / subt_barang * ongkir_tersimpan).round(0)
-                            # selisih pembulatan rupiah ditambahkan ke item terbesar
-                            selisih = ongkir_tersimpan - alokasi.sum()
-                            if selisih != 0:
-                                alokasi.loc[f_df["Total_Row"].idxmax()] += selisih
-                            f_df["Total_Row"] = f_df["Total_Row"] + alokasi
-                            f_df["Harga"] = (f_df["Total_Row"] / f_df["Qty"]).round(0)
+                        ongkir_row = pd.DataFrame([{
+                            "Nama Barang": f"Ongkos Kirim ke {row['Kota Tujuan']}",
+                            "Qty": 1, "Harga": ongkir_tersimpan, "Satuan": "-",
+                            "Total_Row": ongkir_tersimpan,
+                        }])
+                        f_df_cetak = pd.concat([f_df, ongkir_row], ignore_index=True)
 
-                        subt = f_df["Total_Row"].sum()
+                        subt = f_df_cetak["Total_Row"].sum()
                         tax = subt * PPN_RATE
                         gtot = subt + tax
 
-                        st.dataframe(f_df[["Nama Barang", "Qty", "Satuan", "Harga", "Total_Row"]],
+                        st.dataframe(f_df_cetak[["Nama Barang", "Qty", "Satuan", "Harga", "Total_Row"]],
                                      use_container_width=True, hide_index=True)
 
                         t1, t2 = st.columns(2)
-                        t1.metric("Subtotal (harga sudah termasuk ongkir)", fmt_rp(subt))
+                        t1.metric("Subtotal (barang + ongkir)", fmt_rp(subt))
                         t2.metric("Grand Total", fmt_rp(gtot))
 
                         no_s = st.text_input("📄 Nomor Surat:", value="/S-TTS/X/2026", key=f"ns_{real_row}")
@@ -798,11 +832,11 @@ with tab_dash:
 
                         b1, b2 = st.columns(2)
                         pdf_data = generate_pdf(no_s, row["Customer"], row["UP"], row["Kota Tujuan"],
-                                                 f_df, subt, tax, gtot)
+                                                 f_df_cetak, subt, tax, gtot)
                         b1.download_button("📩 PDF", pdf_data, file_name=f"Quo_Nasional_{safe_cust}_{waktu_file}.pdf",
                                             use_container_width=True, type="primary", key=f"pdf_{real_row}")
                         xls_data = generate_excel(no_s, row["Customer"], row["UP"], row["Kota Tujuan"],
-                                                   f_df, subt, tax, gtot)
+                                                   f_df_cetak, subt, tax, gtot)
                         b2.download_button("📊 Excel", xls_data, file_name=f"Quo_Nasional_{safe_cust}_{waktu_file}.xlsx",
                                             use_container_width=True, key=f"xls_{real_row}")
 
