@@ -118,6 +118,29 @@ section.main [data-testid="stExpander"] strong, section.main [data-testid="stExp
 [data-testid="stRadio"] label p, [data-baseweb="radio"] label { color: #1e1e1e !important; }
 [data-testid="stAlert"] p { color: #1e1e1e !important; }
 [data-testid="stMetricLabel"] { color: #5a7a9a !important; }
+
+/* Judul expander (mis. "Update Database Barang", tiap baris penawaran pending)
+   dan caption kadang tidak ke-cover selector di atas tergantung versi Streamlit —
+   ditambahkan beberapa varian selector supaya kena di versi mana pun. */
+.streamlit-expanderHeader {
+    font-weight: 700 !important; color: #002855 !important; font-size: 0.9rem !important;
+}
+[data-testid="stExpander"] summary,
+[data-testid="stExpander"] summary p,
+[data-testid="stExpander"] summary span,
+[data-testid="stExpander"] details summary,
+[data-testid="stExpanderDetails"] summary { color: #002855 !important; font-weight: 600 !important; }
+.stCaption, .stCaption p, [data-testid="stCaptionContainer"],
+[data-testid="stCaptionContainer"] p, [data-testid="stCaptionContainer"] span,
+small { color: #5a7a9a !important; }
+[data-testid="stTabs"] [role="tab"], [data-testid="stTabs"] [role="tab"] p,
+[data-testid="stTabs"] button[role="tab"] p { color: #002855 !important; font-weight: 700 !important; }
+
+/* Jaring pengaman terakhir: paksa teks gelap untuk semua elemen umum di body
+   utama yang belum ketimpa warna spesifik di atas. Pakai tanpa !important supaya
+   aturan warna khusus (emas, putih di tombol, dsb) di atas tetap menang. */
+section.main p, section.main span, section.main div, section.main label,
+section.main li { color: #1e1e1e; }
 </style>
 """, unsafe_allow_html=True)
 
