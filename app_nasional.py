@@ -807,13 +807,19 @@ with tab_dash:
 
                     f_df = pd.DataFrame(items)
                     if not f_df.empty:
+                        # Ongkir TIDAK ditampilkan sebagai baris terpisah ke customer.
+                        # Dibagi rata secara proporsional ke nilai tiap barang, jadi
+                        # harga per barang yang tercetak SUDAH TERMASUK ongkos kirim.
                         ongkir_tersimpan = float(row["Ongkir"]) if row["Ongkir"] else 0.0
-                        ongkir_row = pd.DataFrame([{
-                            "Nama Barang": f"Ongkos Kirim ke {row['Kota Tujuan']}",
-                            "Qty": 1, "Harga": ongkir_tersimpan, "Satuan": "-",
-                            "Total_Row": ongkir_tersimpan,
-                        }])
-                        f_df_cetak = pd.concat([f_df, ongkir_row], ignore_index=True)
+                        subt_barang = f_df["Total_Row"].sum()
+                        f_df_cetak = f_df.copy()
+                        if ongkir_tersimpan > 0 and subt_barang > 0:
+                            alokasi = (f_df_cetak["Total_Row"] / subt_barang * ongkir_tersimpan).round(0)
+                            selisih = ongkir_tersimpan - alokasi.sum()  # rapikan sisa pembulatan rupiah
+                            if selisih != 0:
+                                alokasi.loc[f_df_cetak["Total_Row"].idxmax()] += selisih
+                            f_df_cetak["Total_Row"] = f_df_cetak["Total_Row"] + alokasi
+                            f_df_cetak["Harga"] = (f_df_cetak["Total_Row"] / f_df_cetak["Qty"]).round(0)
 
                         subt = f_df_cetak["Total_Row"].sum()
                         tax = subt * PPN_RATE
@@ -821,9 +827,11 @@ with tab_dash:
 
                         st.dataframe(f_df_cetak[["Nama Barang", "Qty", "Satuan", "Harga", "Total_Row"]],
                                      use_container_width=True, hide_index=True)
+                        st.caption(f"ℹ️ Ongkir Rp{ongkir_tersimpan:,.0f} ke {row['Kota Tujuan']} sudah "
+                                   "dibagi rata ke harga tiap barang di atas (tidak tampil terpisah).")
 
                         t1, t2 = st.columns(2)
-                        t1.metric("Subtotal (barang + ongkir)", fmt_rp(subt))
+                        t1.metric("Subtotal (harga sudah termasuk ongkir)", fmt_rp(subt))
                         t2.metric("Grand Total", fmt_rp(gtot))
 
                         no_s = st.text_input("📄 Nomor Surat:", value="/S-TTS/X/2026", key=f"ns_{real_row}")
