@@ -18,8 +18,8 @@ Aturan bisnis (sudah dikonfirmasi):
 - Barang yang beratnya belum diisi di database TIDAK BISA dimasukkan ke keranjang
 - Minimum ongkir dihitung 1kg, dibulatkan ke atas
 
-Tampilan PDF: bertema Nusantara dengan ornamen batik (kawung + tumpal),
-digambar vektor langsung di bawah (bagian "ORNAMEN BATIK"), tanpa file tambahan.
+Tampilan PDF: bertema Nusantara dengan ornamen tribal (ikal/pusaran) navy-emas,
+digambar vektor langsung di bawah (bagian "ORNAMEN TRIBAL"), tanpa file tambahan.
 Butuh library fpdf2.
 """
 
@@ -63,7 +63,6 @@ PPN_RATE = 0.11
 COLOR_NAVY = (0, 40, 85)
 COLOR_GOLD = (184, 134, 11)
 COLOR_TEXT = (30, 30, 30)
-COLOR_SOGA = (139, 94, 52)  # cokelat soga, warna khas batik
 COLOR_GOLD_LIGHT = (224, 184, 74)  # emas terang untuk ornamen di atas navy
 
 st.set_page_config(page_title=f"{COMPANY_NAME} — Nasional", layout="wide",
@@ -352,143 +351,134 @@ def clear_row_state(real_row):
 
 
 # =========================================================
-# ORNAMEN BATIK (vektor, digambar langsung pakai fpdf2)
+# ORNAMEN TRIBAL (ikal/pusaran vektor, digambar langsung pakai fpdf2)
 # =========================================================
-def batik_kawung(pdf, cx, cy, r, color, opacity=1.0, line_w=0.25):
-    """Satu motif kawung (4 lonjong mengelilingi titik pusat) di (cx, cy)."""
-    pdf.set_draw_color(*color)
+def _orn_sync(pdf):
+    """Paksa FPDF mengirim ulang warna setelah keluar dari clip/rotation/local_context."""
+    pdf.set_fill_color(1, 2, 3); pdf.set_draw_color(1, 2, 3)
+
+
+def orn_mix(c1, c2, t):
+    """Campur dua warna RGB (t=0 -> c1, t=1 -> c2)."""
+    t = max(0.0, min(1.0, t))
+    return tuple(int(round(a + (b - a) * t)) for a, b in zip(c1, c2))
+
+
+def orn_curl(pdf, cx, cy, R, color, rot=0.0, flip=1, turns=1.45, thick=0.34, outline=None):
+    """Satu ikal tribal: pita yang menebal di badan lalu menirus jadi spiral.
+    (cx, cy) = pusat spiral, R = jari-jari luar, rot = arah ujung ekor."""
+    steps = 44
+    pts, us = [], []
+    for i in range(steps + 1):
+        u = i / steps
+        r = R * (0.06 + 0.94 * (1 - u) ** 1.35)
+        th = rot + flip * turns * 2 * math.pi * u
+        pts.append((cx + r * math.cos(th), cy + r * math.sin(th))); us.append(u)
+    left, right = [], []
+    for i, u in enumerate(us):
+        w = R * thick * ((u ** 0.4) * ((1 - u) ** 0.8) / 0.466)
+        x0, y0 = pts[max(i - 1, 0)]; x1, y1 = pts[min(i + 1, steps)]
+        dx, dy = x1 - x0, y1 - y0; L = math.hypot(dx, dy) or 1.0
+        nx, ny = -dy / L, dx / L
+        left.append((pts[i][0] + nx * w / 2, pts[i][1] + ny * w / 2))
+        right.append((pts[i][0] - nx * w / 2, pts[i][1] - ny * w / 2))
     pdf.set_fill_color(*color)
-    pdf.set_line_width(line_w)
-    with pdf.local_context(fill_opacity=opacity, stroke_opacity=opacity):
-        for ang in (0, 90, 180, 270):
-            with pdf.rotation(ang, cx, cy):
-                pdf.ellipse(cx + r * 0.04, cy - r * 0.27, r * 0.92, r * 0.54, style="D")
-        pdf.ellipse(cx - r * 0.07, cy - r * 0.07, r * 0.14, r * 0.14, style="F")
+    if outline:
+        pdf.set_draw_color(*outline); pdf.set_line_width(0.2)
+        pdf.polygon(left + right[::-1], style="DF")
+    else:
+        pdf.polygon(left + right[::-1], style="F")
 
 
-def batik_kawung_pattern(pdf, x, y, w, h, size, color, opacity=0.2, line_w=0.25):
-    """Isi area (x, y, w, h) dengan kawung berulang, dipotong rapi di tepi area."""
-    step = size * 1.9
-    with pdf.rect_clip(x, y, w, h):
-        row = 0
-        yy = y - step / 2
-        while yy < y + h + step:
-            xx = x - step / 2 + (step / 2 if row % 2 else 0)
-            while xx < x + w + step:
-                batik_kawung(pdf, xx, yy, size, color, opacity, line_w)
-                xx += step
-            yy += step / 2
-            row += 1
-
-
-def batik_tumpal_row(pdf, x, y, w, tri_w, tri_h, color, direction="down", inner_color=None):
-    """Deretan segitiga 'pucuk rebung' sebagai border. Alas di garis y."""
-    n = max(1, int(round(w / tri_w)))
-    tw = w / n
-    sign = 1 if direction == "down" else -1
-    pdf.set_fill_color(*color)
+def orn_vine(pdf, x0, x1, y0, R, color_fn, stem_fn=None, step=None, thick=0.34,
+             start_up=True, phase=0.0, outline=None):
+    """Batang rambat horizontal dengan ikal bergantian atas-bawah (tribal wave scroll).
+    color_fn(x) -> warna ikal di posisi x; stem_fn(x) -> warna batang (opsional)."""
+    step = step or R * 1.55
+    if stem_fn:
+        prev = None
+        for i in range(int((x1 - x0) / 2.0) + 1):
+            x = x0 + i * 2.0
+            pt = (x, y0 + R * 0.15 * math.sin((x - x0) / step * math.pi))
+            if prev:
+                pdf.set_draw_color(*stem_fn(x)); pdf.set_line_width(0.25)
+                pdf.line(prev[0], prev[1], pt[0], pt[1])
+            prev = pt
+    n = int((x1 - x0) / step) + 1
     for i in range(n):
-        x0 = x + i * tw
-        pdf.polygon([(x0, y), (x0 + tw, y), (x0 + tw / 2, y + sign * tri_h)], style="F")
-    if inner_color:
-        pdf.set_fill_color(*inner_color)
-        k = 0.55
-        for i in range(n):
-            x0 = x + i * tw + tw * (1 - k) / 2
-            pdf.polygon([(x0, y + sign * 0.5),
-                         (x0 + tw * k, y + sign * 0.5),
-                         (x0 + tw * k / 2, y + sign * (tri_h * k + 0.5))], style="F")
+        x = x0 + phase + i * step
+        if x > x1 + step:
+            break
+        up = (i % 2 == 0) == start_up
+        col = color_fn(x)
+        if up:
+            orn_curl(pdf, x, y0 - R * 0.95, R, col, rot=math.pi / 2, flip=1, thick=thick, outline=outline)
+        else:
+            orn_curl(pdf, x, y0 + R * 0.95, R, col, rot=-math.pi / 2, flip=1, thick=thick, outline=outline)
 
 
-def batik_kawung_ornate(pdf, cx, cy, r, color, fill_op=0.0, line_op=1.0, line_w=0.25, detail=True):
-    """Kawung lengkap dengan isen-isen: lonjong dalam + titik sudut (sawut)."""
-    pdf.set_draw_color(*color); pdf.set_fill_color(*color); pdf.set_line_width(line_w)
-    with pdf.local_context(fill_opacity=fill_op, stroke_opacity=line_op):
-        for ang in (0, 90, 180, 270):
-            with pdf.rotation(ang, cx, cy):
-                pdf.ellipse(cx + r * 0.04, cy - r * 0.27, r * 0.92, r * 0.54,
-                            style="DF" if fill_op > 0 else "D")
-                if detail:
-                    pdf.ellipse(cx + r * 0.26, cy - r * 0.14, r * 0.48, r * 0.28, style="D")
-        pdf.ellipse(cx - r * 0.08, cy - r * 0.08, r * 0.16, r * 0.16, style="DF")
-        if detail:
-            d = r * 0.62
-            for sx, sy in ((1, 1), (1, -1), (-1, 1), (-1, -1)):
-                pdf.ellipse(cx + sx * d - r * 0.045, cy + sy * d - r * 0.045, r * 0.09, r * 0.09, style="F")
+def orn_vine_vertical(pdf, x, y_top, y_bottom, R, color, stem_color=None, thick=0.36):
+    """Batang rambat vertikal (border samping), digambar horizontal lalu diputar 90 derajat."""
+    with pdf.rotation(90, x, y_bottom):
+        orn_vine(pdf, x, x + (y_bottom - y_top), y_bottom, R, lambda _x: color,
+                 (lambda _x: stem_color) if stem_color else None, thick=thick)
+    _orn_sync(pdf)
 
 
-def batik_kawung_fade(pdf, x, y, w, h, size, color, op_from, op_to, fill_ratio=0.3, line_w=0.25):
-    """Pola kawung yang makin pekat dari kiri ke kanan (memudar ke arah teks)."""
-    step = size * 1.9
-    with pdf.rect_clip(x, y, w, h):
-        row = 0
-        yy = y - step / 2
-        while yy < y + h + step:
-            xx = x - step / 2 + (step / 2 if row % 2 else 0)
-            while xx < x + w + step:
-                t = min(1.0, max(0.0, (xx - x) / w))
-                op = op_from + (op_to - op_from) * (t ** 1.6)
-                batik_kawung_ornate(pdf, xx, yy, size, color, fill_op=op * fill_ratio, line_op=op, line_w=line_w)
-                xx += step
-            yy += step / 2
-            row += 1
+def orn_divider(pdf, x1, x2, y, navy, gold, gold_light):
+    """Pembatas elegan: garis emas + ikal kecil bergelombang di kedua ujung."""
+    pdf.set_draw_color(*gold); pdf.set_line_width(0.45)
+    pdf.line(x1 + 30, y, x2 - 30, y)
+    orn_vine(pdf, x1, x1 + 29, y, 1.8, lambda _x: gold, lambda _x: gold, thick=0.42)
+    orn_vine(pdf, x2 - 29, x2, y, 1.8, lambda _x: gold, lambda _x: gold, thick=0.42, start_up=False)
+    _orn_sync(pdf)
 
 
-def batik_parang_band(pdf, x, y, w, h, color, opacity=1.0, line_w=0.45):
-    """Pita parang: deretan lengkung S diagonal dengan 'mata ikan' kecil."""
-    unit = h * 1.6
-    n = int(w / unit) + 3
-    pdf.set_draw_color(*color); pdf.set_fill_color(*color); pdf.set_line_width(line_w)
-    with pdf.rect_clip(x, y, w, h), pdf.local_context(stroke_opacity=opacity, fill_opacity=opacity):
-        for i in range(-1, n):
-            x0 = x + i * unit
-            for k in range(2):
-                off = k * h * 0.28
-                with pdf.new_path() as pth:
-                    pth.move_to(x0 + off, y + h)
-                    pth.curve_to(x0 + off + unit * 0.15, y + h * 0.35,
-                                 x0 + off + unit * 0.55, y + h * 0.75, x0 + off + unit * 0.7, y)
-                    pth.style.paint_rule = "STROKE"
-            pdf.ellipse(x0 + unit * 0.38, y + h * 0.45, h * 0.16, h * 0.16, style="F")
+def orn_corner(pdf, x, y, R, color, sx=1, sy=1):
+    """Hiasan sudut kecil (dua ikal bersilang) yang tumbuh ke arah (sx, sy) dari titik (x, y)."""
+    def pose(rot, flip):
+        if sx < 0:
+            rot, flip = math.pi - rot, -flip
+        if sy < 0:
+            rot, flip = -rot, -flip
+        return rot, flip
+    r1, f1 = pose(-math.pi / 2, 1)
+    r2, f2 = pose(0.0, -1)
+    orn_curl(pdf, x + sx * R, y + sy * R * 1.9, R * 0.85, color, rot=r1, flip=f1, thick=0.4)
+    orn_curl(pdf, x + sx * R * 1.9, y + sy * R, R * 0.85, color, rot=r2, flip=f2, thick=0.4)
+    _orn_sync(pdf)
 
 
-def batik_tumpal_col(pdf, x, y, h, tri_d, tri_w, color, direction="right", inner_color=None):
-    """Deretan segitiga vertikal (border samping). Alas di garis x, ujung menghadap
-    ke kanan (direction="right") atau ke kiri (direction="left")."""
-    n = max(1, int(round(h / tri_w)))
-    tw = h / n
-    sg = 1 if direction == "right" else -1
-    pdf.set_fill_color(*color)
-    for i in range(n):
-        y0 = y + i * tw
-        pdf.polygon([(x, y0), (x, y0 + tw), (x + sg * tri_d, y0 + tw / 2)], style="F")
-    if inner_color:
-        pdf.set_fill_color(*inner_color)
-        k = 0.5
-        for i in range(n):
-            y0 = y + i * tw + tw * (1 - k) / 2
-            pdf.polygon([(x + sg * 0.4, y0), (x + sg * 0.4, y0 + tw * k),
-                         (x + sg * (tri_d * k + 0.4), y0 + tw * k / 2)], style="F")
+def orn_header_art(pdf):
+    """Seni tribal di band header: lapisan ikal biru tone-on-tone + ikal emas
+    yang makin terang ke kanan (area teks di kiri dibiarkan tenang)."""
+    X0, W = 58, 152
+    BLUE_DEEP = (8, 52, 104)     # lapisan latar (samar)
+    BLUE_MID = (22, 78, 138)     # ikal biru
+    BRONZE = (150, 112, 28)
 
+    def gold_col(x):
+        if x < 108:
+            return BLUE_MID
+        if x < 142:
+            return BRONZE
+        if x < 176:
+            return COLOR_GOLD
+        return COLOR_GOLD_LIGHT
 
-def batik_side_borders(pdf, y_top, y_bottom, color_main, color_accent):
-    """Border samping kiri-kanan halaman: deretan tumpal + garis emas tipis."""
-    h = y_bottom - y_top
-    batik_tumpal_col(pdf, 0, y_top, h, 4.5, 6, color_main, "right", inner_color=color_accent)
-    batik_tumpal_col(pdf, 210, y_top, h, 4.5, 6, color_main, "left", inner_color=color_accent)
-    pdf.set_draw_color(*color_accent); pdf.set_line_width(0.3)
-    with pdf.local_context(stroke_opacity=0.7):
-        pdf.line(6.3, y_top, 6.3, y_bottom)
-        pdf.line(203.7, y_top, 203.7, y_bottom)
-
-
-def batik_divider(pdf, x1, x2, y, color, accent):
-    """Garis pembatas elegan: garis emas + kawung mini di kiri + berlian kecil di kanan."""
-    pdf.set_draw_color(*color); pdf.set_line_width(0.5)
-    pdf.line(x1 + 9, y, x2 - 6, y)
-    batik_kawung_ornate(pdf, x1 + 4, y, 4.2, accent, fill_op=0.25, line_op=1.0, line_w=0.25, detail=False)
-    pdf.set_fill_color(*color)
-    pdf.polygon([(x2 - 4, y - 1.6), (x2, y), (x2 - 4, y + 1.6), (x2 - 8, y)], style="F")
+    with pdf.rect_clip(X0, 0, W, 46):
+        # lapisan 1: ikal besar sangat samar sebagai kedalaman
+        orn_vine(pdf, X0 - 6, 220, 22, 13, lambda _x: BLUE_DEEP, thick=0.34, start_up=True)
+        # lapisan 2: dua baris ikal utama
+        orn_vine(pdf, X0 + 4, 215, 8.2, 7.4, gold_col, outline=COLOR_NAVY, thick=0.38)
+        orn_vine(pdf, X0 + 4, 215, 31.5, 7.4, gold_col, outline=COLOR_NAVY, thick=0.38,
+                 start_up=False, phase=5.7)
+    _orn_sync(pdf)
+    # baris kecil di dasar header
+    orn_vine(pdf, 58, 210, 49.4, 2.4,
+             lambda x: BLUE_MID if x < 108 else (COLOR_GOLD if x < 160 else COLOR_GOLD_LIGHT),
+             lambda x: COLOR_GOLD, thick=0.42)
+    _orn_sync(pdf)
 
 
 # =========================================================
@@ -500,16 +490,16 @@ class PenawaranPDF(FPDF):
         self.total_pages = total_pages
 
     def header(self):
-        # Latar halaman: kawung sangat tipis (digambar paling awal, di belakang konten)
-        batik_kawung_pattern(self, 0, 56, 210, 220, 9, COLOR_SOGA, opacity=0.07, line_w=0.3)
+        # Latar halaman: dua pusaran besar sangat tipis (di belakang konten)
+        faint = orn_mix((255, 255, 255), COLOR_NAVY, 0.055)
+        with self.rect_clip(0, 56, 210, 222):
+            orn_curl(self, 188, 100, 38, faint, rot=0.4, flip=1, thick=0.34)
+            orn_curl(self, 24, 236, 34, faint, rot=3.5, flip=-1, thick=0.34)
+        _orn_sync(self)
 
-        # Band header navy + kawung ornamen emas (makin pekat ke kanan, lembut di area teks)
+        # Band header navy + seni tribal emas
         self.set_fill_color(*COLOR_NAVY); self.rect(0, 0, 210, 52, 'F')
-        batik_kawung_fade(self, 58, 0, 152, 46, 8, COLOR_GOLD_LIGHT, 0.04, 0.8, fill_ratio=0.3)
-
-        # Pita parang di dasar header
-        self.set_fill_color(0, 28, 62); self.rect(0, 46, 210, 6, 'F')
-        batik_parang_band(self, 0, 46, 210, 6, COLOR_GOLD, opacity=0.95)
+        orn_header_art(self)
 
         # Kotak logo + bingkai emas
         self.set_fill_color(255, 255, 255); self.rect(10, 6, 44, 40, 'F')
@@ -527,23 +517,30 @@ class PenawaranPDF(FPDF):
         self.set_x(66); self.cell(0, 4.5, f"Office: {OFFICE_PHONE}  |  WA: {MARKETING_WA}", ln=1)
         self.set_x(66); self.cell(0, 4.5, f"Email: {MARKETING_EMAIL}", ln=1)
 
-        # Garis emas + border tumpal di bawah header
+        # Garis emas ganda di bawah header
         self.set_fill_color(*COLOR_GOLD); self.rect(0, 52, 210, 1.5, 'F')
-        batik_tumpal_row(self, 0, 53.5, 210, 6, 4.5, COLOR_NAVY, "down", inner_color=COLOR_GOLD)
-        # Border samping sepanjang body (turun dari header sampai footer)
-        batik_side_borders(self, 60, 274, COLOR_NAVY, COLOR_GOLD)
+        self.set_draw_color(*COLOR_GOLD); self.set_line_width(0.25); self.line(0, 55.2, 210, 55.2)
+
+        # Border samping: batang rambat vertikal navy dengan batang emas
+        orn_vine_vertical(self, 4.6, 59, 272, 1.9, COLOR_NAVY, COLOR_GOLD, thick=0.42)
+        orn_vine_vertical(self, 205.4, 59, 272, 1.9, COLOR_NAVY, COLOR_GOLD, thick=0.42)
         self.set_y(62)
 
     def footer(self):
-        y = 274.5
-        # Cermin header: tumpal menghadap ke atas, garis emas, band navy + parang di dasar
-        batik_tumpal_row(self, 0, y + 4.5, 210, 6, 4.5, COLOR_NAVY, "up", inner_color=COLOR_GOLD)
-        self.set_fill_color(*COLOR_GOLD); self.rect(0, y + 4.5, 210, 1.5, 'F')
-        self.set_fill_color(*COLOR_NAVY); self.rect(0, y + 6, 210, 297 - (y + 6), 'F')
-        batik_kawung_pattern(self, 0, y + 6, 210, 297 - (y + 6), 4.5, COLOR_GOLD_LIGHT, opacity=0.2, line_w=0.2)
-        self.set_fill_color(0, 28, 62); self.rect(0, 291, 210, 6, 'F')
-        batik_parang_band(self, 0, 291, 210, 6, COLOR_GOLD, opacity=0.95)
-        self.set_y(281.5); self.set_font('Arial', 'B', 8); self.set_text_color(255, 255, 255)
+        y = 279
+        self.set_fill_color(*COLOR_GOLD); self.rect(0, y, 210, 1.5, 'F')
+        self.set_draw_color(*COLOR_GOLD); self.set_line_width(0.25); self.line(0, y - 1.7, 210, y - 1.7)
+        self.set_fill_color(*COLOR_NAVY); self.rect(0, y + 1.5, 210, 297 - (y + 1.5), 'F')
+        # Batang rambat emas di dasar footer: ikal hanya di kedua sisi (tengah dibiarkan untuk teks)
+        self.set_draw_color(*COLOR_GOLD); self.set_line_width(0.3)
+        self.line(0, 292.4, 210, 292.4)
+        for xa, xb in ((0, 40), (176, 214)):
+            with self.rect_clip(xa, y + 1.5, xb - xa, 297 - (y + 1.5)):
+                orn_vine(self, xa, xb, 292.4, 3.3,
+                         lambda x: COLOR_GOLD_LIGHT, lambda x: COLOR_GOLD, thick=0.4, start_up=False)
+            _orn_sync(self)
+        _orn_sync(self)
+        self.set_y(281.6); self.set_font('Arial', 'B', 8); self.set_text_color(255, 255, 255)
         self.cell(0, 5, SLOGAN.upper(), 0, 1, 'C')
         self.set_font('Arial', '', 7); self.set_text_color(*COLOR_GOLD_LIGHT)
         self.cell(0, 4, f"{COMPANY_NAME}  |  {ADDR}  |  Hal. {self.page_no()} / {self.total_pages}", 0, 0, 'C')
@@ -570,7 +567,7 @@ def generate_pdf(no_surat, nama_cust, pic, kota_tujuan, df_order, subtotal, ppn,
         pdf.set_margins(10, 70, 10); pdf.set_auto_page_break(auto=True, margin=28); pdf.add_page()
         pdf.set_y(62); pdf.set_font('Arial', 'B', 26); pdf.set_text_color(*COLOR_NAVY)
         pdf.cell(0, 10, "QUOTATION", ln=1, align='R')
-        batik_divider(pdf, 10, 200, pdf.get_y() + 0.5, COLOR_GOLD, COLOR_GOLD); pdf.ln(3)
+        orn_divider(pdf, 14, 196, pdf.get_y() + 4.2, COLOR_NAVY, COLOR_GOLD, COLOR_GOLD_LIGHT); pdf.ln(8)
         waktu = datetime.utcnow() + timedelta(hours=7); expiry = waktu + timedelta(days=7)
         pdf.set_font('Arial', '', 8.5); pdf.set_text_color(100, 100, 100)
         pdf.cell(0, 5, f"No. Surat   : {no_surat}", ln=1, align='R')
@@ -620,7 +617,8 @@ def generate_pdf(no_surat, nama_cust, pic, kota_tujuan, df_order, subtotal, ppn,
         y_tc = pdf.get_y()
         pdf.set_fill_color(248, 250, 253); pdf.set_draw_color(*COLOR_NAVY); pdf.set_line_width(0.4)
         pdf.rect(10, y_tc, 120, TC_H, 'DF')
-        batik_tumpal_row(pdf, 10, y_tc, 120, 4, 2.6, COLOR_GOLD, "up", inner_color=COLOR_NAVY)
+        orn_corner(pdf, 128.5, y_tc + 1.5, 2.6, COLOR_GOLD, sx=-1, sy=1)
+        orn_corner(pdf, 11.5, y_tc + TC_H - 1.5, 2.6, COLOR_GOLD, sx=1, sy=-1)
         pdf.set_y(y_tc + 3); pdf.set_x(13); pdf.set_font('Arial', 'B', 9); pdf.set_text_color(*COLOR_NAVY)
         pdf.cell(116, 5, "SYARAT & KETENTUAN:", ln=1)
         pdf.set_draw_color(*COLOR_GOLD); pdf.set_line_width(0.5); pdf.line(13, pdf.get_y(), 127, pdf.get_y()); pdf.ln(2)
