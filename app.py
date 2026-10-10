@@ -452,6 +452,45 @@ def batik_parang_band(pdf, x, y, w, h, color, opacity=1.0, line_w=0.45):
             pdf.ellipse(x0 + unit * 0.38, y + h * 0.45, h * 0.16, h * 0.16, style="F")
 
 
+def batik_tumpal_col(pdf, x, y, h, tri_d, tri_w, color, direction="right", inner_color=None):
+    """Deretan segitiga vertikal (border samping). Alas di garis x, ujung menghadap
+    ke kanan (direction="right") atau ke kiri (direction="left")."""
+    n = max(1, int(round(h / tri_w)))
+    tw = h / n
+    sg = 1 if direction == "right" else -1
+    pdf.set_fill_color(*color)
+    for i in range(n):
+        y0 = y + i * tw
+        pdf.polygon([(x, y0), (x, y0 + tw), (x + sg * tri_d, y0 + tw / 2)], style="F")
+    if inner_color:
+        pdf.set_fill_color(*inner_color)
+        k = 0.5
+        for i in range(n):
+            y0 = y + i * tw + tw * (1 - k) / 2
+            pdf.polygon([(x + sg * 0.4, y0), (x + sg * 0.4, y0 + tw * k),
+                         (x + sg * (tri_d * k + 0.4), y0 + tw * k / 2)], style="F")
+
+
+def batik_side_borders(pdf, y_top, y_bottom, color_main, color_accent):
+    """Border samping kiri-kanan halaman: deretan tumpal + garis emas tipis."""
+    h = y_bottom - y_top
+    batik_tumpal_col(pdf, 0, y_top, h, 4.5, 6, color_main, "right", inner_color=color_accent)
+    batik_tumpal_col(pdf, 210, y_top, h, 4.5, 6, color_main, "left", inner_color=color_accent)
+    pdf.set_draw_color(*color_accent); pdf.set_line_width(0.3)
+    with pdf.local_context(stroke_opacity=0.7):
+        pdf.line(6.3, y_top, 6.3, y_bottom)
+        pdf.line(203.7, y_top, 203.7, y_bottom)
+
+
+def batik_divider(pdf, x1, x2, y, color, accent):
+    """Garis pembatas elegan: garis emas + kawung mini di kiri + berlian kecil di kanan."""
+    pdf.set_draw_color(*color); pdf.set_line_width(0.5)
+    pdf.line(x1 + 9, y, x2 - 6, y)
+    batik_kawung_ornate(pdf, x1 + 4, y, 4.2, accent, fill_op=0.25, line_op=1.0, line_w=0.25, detail=False)
+    pdf.set_fill_color(*color)
+    pdf.polygon([(x2 - 4, y - 1.6), (x2, y), (x2 - 4, y + 1.6), (x2 - 8, y)], style="F")
+
+
 # =========================================================
 # PDF
 # =========================================================
@@ -491,17 +530,22 @@ class PenawaranPDF(FPDF):
         # Garis emas + border tumpal di bawah header
         self.set_fill_color(*COLOR_GOLD); self.rect(0, 52, 210, 1.5, 'F')
         batik_tumpal_row(self, 0, 53.5, 210, 6, 4.5, COLOR_NAVY, "down", inner_color=COLOR_GOLD)
+        # Border samping sepanjang body (turun dari header sampai footer)
+        batik_side_borders(self, 60, 274, COLOR_NAVY, COLOR_GOLD)
         self.set_y(62)
 
     def footer(self):
-        y = 279
-        batik_tumpal_row(self, 0, y, 210, 6, 4.5, COLOR_NAVY, "up", inner_color=COLOR_GOLD)
-        self.set_fill_color(*COLOR_GOLD); self.rect(0, y, 210, 1.5, 'F')
-        self.set_fill_color(*COLOR_NAVY); self.rect(0, y + 1.5, 210, 17, 'F')
-        batik_kawung_pattern(self, 0, y + 1.5, 210, 17, 4.5, COLOR_GOLD, opacity=0.3, line_w=0.2)
-        self.set_y(-14); self.set_font('Arial', 'B', 8); self.set_text_color(255, 255, 255)
+        y = 274.5
+        # Cermin header: tumpal menghadap ke atas, garis emas, band navy + parang di dasar
+        batik_tumpal_row(self, 0, y + 4.5, 210, 6, 4.5, COLOR_NAVY, "up", inner_color=COLOR_GOLD)
+        self.set_fill_color(*COLOR_GOLD); self.rect(0, y + 4.5, 210, 1.5, 'F')
+        self.set_fill_color(*COLOR_NAVY); self.rect(0, y + 6, 210, 297 - (y + 6), 'F')
+        batik_kawung_pattern(self, 0, y + 6, 210, 297 - (y + 6), 4.5, COLOR_GOLD_LIGHT, opacity=0.2, line_w=0.2)
+        self.set_fill_color(0, 28, 62); self.rect(0, 291, 210, 6, 'F')
+        batik_parang_band(self, 0, 291, 210, 6, COLOR_GOLD, opacity=0.95)
+        self.set_y(281.5); self.set_font('Arial', 'B', 8); self.set_text_color(255, 255, 255)
         self.cell(0, 5, SLOGAN.upper(), 0, 1, 'C')
-        self.set_font('Arial', '', 7); self.set_text_color(*COLOR_GOLD)
+        self.set_font('Arial', '', 7); self.set_text_color(*COLOR_GOLD_LIGHT)
         self.cell(0, 4, f"{COMPANY_NAME}  |  {ADDR}  |  Hal. {self.page_no()} / {self.total_pages}", 0, 0, 'C')
 
 
@@ -526,7 +570,7 @@ def generate_pdf(no_surat, nama_cust, pic, kota_tujuan, df_order, subtotal, ppn,
         pdf.set_margins(10, 70, 10); pdf.set_auto_page_break(auto=True, margin=28); pdf.add_page()
         pdf.set_y(62); pdf.set_font('Arial', 'B', 26); pdf.set_text_color(*COLOR_NAVY)
         pdf.cell(0, 10, "QUOTATION", ln=1, align='R')
-        pdf.set_draw_color(*COLOR_GOLD); pdf.set_line_width(0.8); pdf.line(10, pdf.get_y(), 200, pdf.get_y()); pdf.ln(2)
+        batik_divider(pdf, 10, 200, pdf.get_y() + 0.5, COLOR_GOLD, COLOR_GOLD); pdf.ln(3)
         waktu = datetime.utcnow() + timedelta(hours=7); expiry = waktu + timedelta(days=7)
         pdf.set_font('Arial', '', 8.5); pdf.set_text_color(100, 100, 100)
         pdf.cell(0, 5, f"No. Surat   : {no_surat}", ln=1, align='R')
@@ -568,13 +612,15 @@ def generate_pdf(no_surat, nama_cust, pic, kota_tujuan, df_order, subtotal, ppn,
         pdf.set_draw_color(*COLOR_GOLD); pdf.set_line_width(0.8); pdf.line(120, pdf.get_y(), 200, pdf.get_y())
 
         TC_H = 62; BOTTOM = 297 - 28
-        if pdf.get_y() + 10 + TC_H > BOTTOM:
+        SIGN_H = 76  # blok tanda tangan lebih tinggi dari kotak T&C, hitung yang terbesar
+        if pdf.get_y() + 10 + max(TC_H, SIGN_H) > BOTTOM:
             pdf.add_page(); pdf.set_y(68)
         else:
             pdf.ln(10)
         y_tc = pdf.get_y()
         pdf.set_fill_color(248, 250, 253); pdf.set_draw_color(*COLOR_NAVY); pdf.set_line_width(0.4)
         pdf.rect(10, y_tc, 120, TC_H, 'DF')
+        batik_tumpal_row(pdf, 10, y_tc, 120, 4, 2.6, COLOR_GOLD, "up", inner_color=COLOR_NAVY)
         pdf.set_y(y_tc + 3); pdf.set_x(13); pdf.set_font('Arial', 'B', 9); pdf.set_text_color(*COLOR_NAVY)
         pdf.cell(116, 5, "SYARAT & KETENTUAN:", ln=1)
         pdf.set_draw_color(*COLOR_GOLD); pdf.set_line_width(0.5); pdf.line(13, pdf.get_y(), 127, pdf.get_y()); pdf.ln(2)
