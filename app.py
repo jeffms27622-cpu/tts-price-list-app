@@ -64,6 +64,7 @@ COLOR_NAVY = (0, 40, 85)
 COLOR_GOLD = (184, 134, 11)
 COLOR_TEXT = (30, 30, 30)
 COLOR_SOGA = (139, 94, 52)  # cokelat soga, warna khas batik
+COLOR_GOLD_LIGHT = (224, 184, 74)  # emas terang untuk ornamen di atas navy
 
 st.set_page_config(page_title=f"{COMPANY_NAME} — Nasional", layout="wide",
                     page_icon="🚚", initial_sidebar_state="collapsed")
@@ -399,6 +400,58 @@ def batik_tumpal_row(pdf, x, y, w, tri_w, tri_h, color, direction="down", inner_
                          (x0 + tw * k / 2, y + sign * (tri_h * k + 0.5))], style="F")
 
 
+def batik_kawung_ornate(pdf, cx, cy, r, color, fill_op=0.0, line_op=1.0, line_w=0.25, detail=True):
+    """Kawung lengkap dengan isen-isen: lonjong dalam + titik sudut (sawut)."""
+    pdf.set_draw_color(*color); pdf.set_fill_color(*color); pdf.set_line_width(line_w)
+    with pdf.local_context(fill_opacity=fill_op, stroke_opacity=line_op):
+        for ang in (0, 90, 180, 270):
+            with pdf.rotation(ang, cx, cy):
+                pdf.ellipse(cx + r * 0.04, cy - r * 0.27, r * 0.92, r * 0.54,
+                            style="DF" if fill_op > 0 else "D")
+                if detail:
+                    pdf.ellipse(cx + r * 0.26, cy - r * 0.14, r * 0.48, r * 0.28, style="D")
+        pdf.ellipse(cx - r * 0.08, cy - r * 0.08, r * 0.16, r * 0.16, style="DF")
+        if detail:
+            d = r * 0.62
+            for sx, sy in ((1, 1), (1, -1), (-1, 1), (-1, -1)):
+                pdf.ellipse(cx + sx * d - r * 0.045, cy + sy * d - r * 0.045, r * 0.09, r * 0.09, style="F")
+
+
+def batik_kawung_fade(pdf, x, y, w, h, size, color, op_from, op_to, fill_ratio=0.3, line_w=0.25):
+    """Pola kawung yang makin pekat dari kiri ke kanan (memudar ke arah teks)."""
+    step = size * 1.9
+    with pdf.rect_clip(x, y, w, h):
+        row = 0
+        yy = y - step / 2
+        while yy < y + h + step:
+            xx = x - step / 2 + (step / 2 if row % 2 else 0)
+            while xx < x + w + step:
+                t = min(1.0, max(0.0, (xx - x) / w))
+                op = op_from + (op_to - op_from) * (t ** 1.6)
+                batik_kawung_ornate(pdf, xx, yy, size, color, fill_op=op * fill_ratio, line_op=op, line_w=line_w)
+                xx += step
+            yy += step / 2
+            row += 1
+
+
+def batik_parang_band(pdf, x, y, w, h, color, opacity=1.0, line_w=0.45):
+    """Pita parang: deretan lengkung S diagonal dengan 'mata ikan' kecil."""
+    unit = h * 1.6
+    n = int(w / unit) + 3
+    pdf.set_draw_color(*color); pdf.set_fill_color(*color); pdf.set_line_width(line_w)
+    with pdf.rect_clip(x, y, w, h), pdf.local_context(stroke_opacity=opacity, fill_opacity=opacity):
+        for i in range(-1, n):
+            x0 = x + i * unit
+            for k in range(2):
+                off = k * h * 0.28
+                with pdf.new_path() as pth:
+                    pth.move_to(x0 + off, y + h)
+                    pth.curve_to(x0 + off + unit * 0.15, y + h * 0.35,
+                                 x0 + off + unit * 0.55, y + h * 0.75, x0 + off + unit * 0.7, y)
+                    pth.style.paint_rule = "STROKE"
+            pdf.ellipse(x0 + unit * 0.38, y + h * 0.45, h * 0.16, h * 0.16, style="F")
+
+
 # =========================================================
 # PDF
 # =========================================================
@@ -411,17 +464,24 @@ class PenawaranPDF(FPDF):
         # Latar halaman: kawung sangat tipis (digambar paling awal, di belakang konten)
         batik_kawung_pattern(self, 0, 56, 210, 220, 9, COLOR_SOGA, opacity=0.07, line_w=0.3)
 
-        # Band header navy + kawung emas
+        # Band header navy + kawung ornamen emas (makin pekat ke kanan, lembut di area teks)
         self.set_fill_color(*COLOR_NAVY); self.rect(0, 0, 210, 52, 'F')
-        batik_kawung_pattern(self, 62, 0, 148, 52, 7, COLOR_GOLD, opacity=0.28)
+        batik_kawung_fade(self, 58, 0, 152, 46, 8, COLOR_GOLD_LIGHT, 0.04, 0.8, fill_ratio=0.3)
+
+        # Pita parang di dasar header
+        self.set_fill_color(0, 28, 62); self.rect(0, 46, 210, 6, 'F')
+        batik_parang_band(self, 0, 46, 210, 6, COLOR_GOLD, opacity=0.95)
+
+        # Kotak logo + bingkai emas
         self.set_fill_color(255, 255, 255); self.rect(10, 6, 44, 40, 'F')
-        self.set_fill_color(*COLOR_GOLD); self.rect(58, 0, 3, 52, 'F')
+        self.set_draw_color(*COLOR_GOLD); self.set_line_width(0.6); self.rect(8.5, 4.5, 47, 43)
+        self.set_fill_color(*COLOR_GOLD); self.rect(58, 0, 3, 46, 'F')
         if os.path.exists("logo.png"):
             self.image("logo.png", 13, 10, 38)
         self.set_y(10); self.set_x(66)
         self.set_font('Arial', 'B', 17); self.set_text_color(255, 255, 255)
         self.cell(0, 8, COMPANY_NAME, ln=1)
-        self.set_x(66); self.set_font('Arial', 'B', 8.5); self.set_text_color(*COLOR_GOLD)
+        self.set_x(66); self.set_font('Arial', 'B', 8.5); self.set_text_color(*COLOR_GOLD_LIGHT)
         self.cell(0, 5, "  ".join(SLOGAN.upper()), ln=1)
         self.set_y(29); self.set_x(66); self.set_font('Arial', '', 7.5); self.set_text_color(210, 220, 235)
         self.cell(0, 4.5, ADDR, ln=1)
